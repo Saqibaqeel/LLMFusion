@@ -18,8 +18,10 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "limiter": "^3.0.0",
+    "lru-cache": "^11.1.0",
     "method-override": "^3.0.0",
     "mongoose": "^8.14.1",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "object-hash": "^3.0.0"
   }
 }
