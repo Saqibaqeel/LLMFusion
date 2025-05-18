@@ -1,4 +1,5 @@
 import React from 'react'
+
 import SignUp from './components/SignUp'
 import ChooseBot from './components/ChooseBot'
 import FeaturePanel from './components/FeaturePanel'
@@ -15,6 +16,7 @@ import FarmBoat from './components/FarmBoat'
 import MedicalBot from './components/Medicalbot'
 import LegalBot from './components/LegalBot'
 import EducationBot from './components/EductionBot'
+import MainChooseBot from './components/MainChooseBot'
 
 function App() {
   const navigate = useNavigate();
@@ -40,7 +42,8 @@ function App() {
     <Toaster />
     <Routes>
     <Route path="/" element={<Home />} />
-    <Route path="/choose" element={<ChooseBot />} />
+    {/* <Route path="/choosebot" element={<ChatBox/>} /> */}
+ 
 
     <Route path="/listOchat" element={<ListofBoat />} />
     <Route path="/farming-chat" element={<FarmBoat />} />
@@ -50,7 +53,7 @@ function App() {
       <Route path="/signup" element={<SignUp />} />
      
     <Route path="/login" element={<Login />} />
-      <Route path="/chat"element={authUser?<ChatBox/>:<Home/>} />
+      <Route path="/chat"element={authUser?<MainChooseBot/>:<Home/>} />
     
     </Routes>
   

@@ -1,10 +1,11 @@
 const router = require('express').Router();
-const {judgeAndGenerate} = require('../controllers/mlcontroler');
+const {judgeAndGenerate,llmController} = require('../controllers/mlcontroler');
 
 const protected = require('../middleware/protected')
 
 router.post('/judgeAndGenerate',  judgeAndGenerate);
-// router.post('/analyzeAndRespond',  expertRouter);
+router.post('/llm', llmController);
+
 
 
 

@@ -1,245 +1,308 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import useAuth from '../store/UseAuth';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { 
-  FaVolumeUp, FaVolumeMute, FaMicrophone, FaStopCircle, 
-  FaSun, FaMoon, FaPaperPlane, FaSignOutAlt, FaInfoCircle 
-} from 'react-icons/fa';
 
 const LANGUAGES = {
   en: { name: 'English', native: 'English', code: 'en', voiceCode: 'en-US' },
   hi: { name: 'Hindi', native: 'हिन्दी', code: 'hi', voiceCode: 'hi-IN' },
+  ar: { name: 'Arabic', native: 'العربية', code: 'ar', voiceCode: 'ar-SA' },
   te: { name: 'Telugu', native: 'తెలుగు', code: 'te', voiceCode: 'te-IN' },
   ta: { name: 'Tamil', native: 'தமிழ்', code: 'ta', voiceCode: 'ta-IN' },
   ur: { name: 'Urdu', native: 'اردو', code: 'ur', voiceCode: 'ur-PK' }
 };
 
-const NVIDIA_MODELS = {
-  'meta/llama3-70b-instruct': 'Llama 3 (70B)',
-  'google/gemma-7b': 'Gemma (7B)',
-  'deepseek-ai/deepseek-r1-distill-llama-8b': 'DeepSeek-R1 (8B)',
-  'nvidia/nemotron-3-8b-base-4k': 'Nemotron-3 (8B)',
-  'mistralai/mistral-7b-instruct': 'Mistral (7B)'
-};
-
-const ChatInterface = () => {
+const ChooseBot = () => {
   const navigate = useNavigate();
   const { logout, isLogout } = useAuth();
+
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [abortController] = useState(() => new AbortController());
+  const [abortController, setAbortController] = useState(new AbortController());
   const [selectedLanguage, setSelectedLanguage] = useState('en');
+
   const messagesEndRef = useRef(null);
-  const synthesis = useRef(null);
+  const synthesis = useRef(window.speechSynthesis);
   const recognition = useRef(null);
+  const utterance = useRef(null);
 
-  // Speech initialization
   useEffect(() => {
-    synthesis.current = window.speechSynthesis || null;
+    recognition.current = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.current.continuous = false;
+    recognition.current.interimResults = false;
+    recognition.current.lang = LANGUAGES[selectedLanguage].voiceCode;
+    recognition.current.onresult = (e) => {
+      setInput(e.results[0][0].transcript);
+      setIsRecording(false);
+    };
+    recognition.current.onerror = () => setIsRecording(false);
 
-    const initializeSpeechRecognition = () => {
-      if (window.SpeechRecognition || window.webkitSpeechRecognition) {
-        recognition.current = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-        recognition.current.continuous = false;
-        recognition.current.interimResults = false;
-        recognition.current.lang = LANGUAGES[selectedLanguage].voiceCode;
-
-        recognition.current.onresult = (event) => {
-          const transcript = event.results[0][0].transcript;
-          setInput(transcript);
-          setIsRecording(false);
-        };
-
-        recognition.current.onerror = () => {
-          setIsRecording(false);
-          console.error('Speech recognition error');
-        };
+    const loadVoices = () => {
+      const voices = synthesis.current.getVoices();
+      if (voices.length) {
+        utterance.current = new SpeechSynthesisUtterance();
+        const voice = voices.find(v => v.lang === LANGUAGES[selectedLanguage].voiceCode);
+        utterance.current.voice = voice || voices[0];
+        utterance.current.lang = utterance.current.voice.lang;
       }
     };
-
-    initializeSpeechRecognition();
+    loadVoices();
+    synthesis.current.addEventListener('voiceschanged', loadVoices);
 
     return () => {
-      synthesis.current?.cancel();
-      recognition.current?.stop();
+      synthesis.current.removeEventListener('voiceschanged', loadVoices);
+      synthesis.current.cancel();
     };
   }, [selectedLanguage]);
 
-  const scrollToBottom = useCallback(() => {
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  useEffect(() => {
+    setMessages(prev => prev.map(msg => ({
+      ...msg,
+      content: msg.content.replace(/<think>.*?<\/think>/gs, '')
+    })));
   }, []);
 
-  useEffect(() => scrollToBottom(), [messages, scrollToBottom]);
+  const formatModelName = (modelId) => {
+    const [provider, name] = modelId.split('/');
+    return `${provider.charAt(0).toUpperCase() + provider.slice(1)} ${name.split('-')[0].toUpperCase()}`;
+  };
 
-  const handleStop = useCallback(() => {
+  const handleStop = () => {
     abortController.abort();
     setIsLoading(false);
-    setMessages(prev => [...prev, {
-      content: '⏹️ Response generation stopped',
-      isBot: true,
-      error: true
-    }]);
-  }, [abortController]);
+    setMessages(prev => [
+      ...prev,
+      { content: '⏹️ Response generation stopped', isBot: true, error: true }
+    ]);
+    setAbortController(new AbortController());
+  };
 
-  const toggleDarkMode = useCallback(() => setIsDarkMode(prev => !prev), []);
-
-  const handleLogout = useCallback(() => {
+  const toggleDarkMode = () => setIsDarkMode(dm => !dm);
+  const handleLogout = () => {
     if (!isLogout) {
       logout();
       navigate('/');
     }
-  }, [isLogout, logout, navigate]);
+  };
+  const handleVoiceInput = () => {
+    if (isRecording) recognition.current.stop();
+    else recognition.current.start();
+    setIsRecording(rec => !rec);
+  };
 
-  const handleVoiceInput = useCallback(() => {
-    if (!recognition.current) return;
-    isRecording ? recognition.current.stop() : recognition.current.start();
-    setIsRecording(!isRecording);
-  }, [isRecording]);
-
-  const toggleSpeech = useCallback((text) => {
-    if (!synthesis.current) return;
-    
+  const toggleSpeech = (text) => {
     if (isSpeaking) {
       synthesis.current.cancel();
-      setIsSpeaking(false);
-      return;
+      return setIsSpeaking(false);
     }
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.voice = synthesis.current.getVoices().find(
-      v => v.lang === LANGUAGES[selectedLanguage].voiceCode
-    );
-    
-    utterance.onend = utterance.onerror = () => setIsSpeaking(false);
-    synthesis.current.speak(utterance);
+    if (!utterance.current) return console.error('No TTS available');
+    utterance.current.text = text;
+    synthesis.current.speak(utterance.current);
     setIsSpeaking(true);
-  }, [isSpeaking, selectedLanguage]);
+  };
 
-  const handleSubmit = useCallback(async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
+    setIsLoading(true);
+    synthesis.current.cancel();
+    const controller = new AbortController();
+    setAbortController(controller);
+
+    setMessages(prev => [...prev, { content: input, isBot: false }]);
+
     try {
-      setIsLoading(true);
-      synthesis.current?.cancel();
-      
-      const userMessage = { content: input, isBot: false };
-      setMessages(prev => [...prev, userMessage]);
+      const { data } = await axios.post(
+        'http://localhost:3000/api/ml/llm',
+        { prompt: input, language: selectedLanguage },
+        { signal: controller.signal }
+      );
 
-      const response = await axios.post('http://localhost:3000/api/ml/analyzeAndRespond', {
-        prompt: input,
-        language: selectedLanguage
-      }, {
-        signal: abortController.signal,
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-      const botMessage = {
-        content: response.data.response,
-        isBot: true,
-        model: response.data.model,
-        responseTime: response.data.responseTime,
-        cached: response.data.cachedCategory
-      };
-
-      setMessages(prev => [...prev, botMessage]);
+      setMessages(prev => [
+        ...prev,
+        {
+          content: data.response.replace(/<think>.*?<\/think>/gs, ''),
+          isBot: true,
+          model: data.model.id,
+          candidates: data.candidates,
+          responseTime: data.responseTime
+        }
+      ]);
       setInput('');
-    } catch (error) {
-      const errorMessage = error.response?.data?.error || 
-        error.request ? 'Server not responding' : 
-        'Failed to process request';
-      
-      setMessages(prev => [...prev, {
-        content: `⚠️ ${errorMessage}`,
-        isBot: true,
-        error: true
-      }]);
+    } catch (err) {
+      if (!axios.isCancel(err)) {
+        setMessages(prev => [
+          ...prev,
+          { content: '⚠️ Failed to get response.', isBot: true, error: true }
+        ]);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, selectedLanguage, abortController]);
+  };
+
+  const getPlaceholder = () => {
+    switch (selectedLanguage) {
+      case 'te': return 'ఏదైనా ప్రశ్న అడగండి...';
+      case 'hi': return 'कोई प्रश्न पूछें...';
+      case 'ta': return 'எந்த கேள்வியையும் கேளுங்கள்...';
+      case 'ur': return 'کوئی سوال پوچھیں...';
+      case 'ar': return 'اطرح أي سؤال...';
+      default:   return 'Ask your question...';
+    }
+  };
 
   return (
-    <div className={`chat-container ${isDarkMode ? 'dark' : 'light'}`}>
-      <div className="header">
-        <select
-          value={selectedLanguage}
-          onChange={e => setSelectedLanguage(e.target.value)}
-          className="language-select"
-        >
-          {Object.entries(LANGUAGES).map(([code, lang]) => (
-            <option key={code} value={code}>
-              {lang.native} ({lang.name})
-            </option>
-          ))}
-        </select>
+    <div className={`vh-100 d-flex flex-column ${isDarkMode ? 'bg-dark text-light' : 'bg-light'}`}>
+      {/* Header */}
+      <div className="d-flex justify-content-between align-items-center p-3 border-bottom">
+        <div className="d-flex gap-2 align-items-center">
+          <select
+            className={`form-select form-select-sm ${isDarkMode ? 'bg-dark text-light border-secondary' : ''}`}
+            value={selectedLanguage}
+            onChange={e => setSelectedLanguage(e.target.value)}
+          >
+            {Object.values(LANGUAGES).map(lang => (
+              <option key={lang.code} value={lang.code}>
+                {lang.native} ({lang.name})
+              </option>
+            ))}
+          </select>
 
-        <div className="controls">
-          <button onClick={toggleDarkMode}>
-            {isDarkMode ? <FaSun /> : <FaMoon />}
-          </button>
-          <button onClick={handleLogout}>
-            <FaSignOutAlt />
+          {isLoading && (
+            <button className="btn btn-danger btn-sm" onClick={handleStop}>
+              <i className="fas fa-stop-circle me-2"></i> Stop
+            </button>
+          )}
+
+          <button 
+            className={`btn btn-sm ${isDarkMode ? 'btn-outline-light' : 'btn-outline-dark'}`}
+            onClick={handleLogout}
+          >
+            <i className="fas fa-sign-out-alt me-2"></i> Logout
           </button>
         </div>
+
+        <button 
+          className={`btn btn-sm ${isDarkMode ? 'btn-outline-light' : 'btn-outline-dark'}`}
+          onClick={toggleDarkMode}
+        >
+          <i className={`fas ${isDarkMode ? 'fa-sun' : 'fa-moon'}`}></i>
+        </button>
       </div>
 
-      <div className="chat-messages">
-        {messages.map((msg, index) => (
-          <div key={index} className={`message ${msg.isBot ? 'bot' : 'user'}`}>
-            <div className={`content ${msg.error ? 'error' : ''}`}>
+      {/* Chat Messages */}
+      <div className="flex-grow-1 overflow-auto p-3">
+        {messages.map((msg, i) => (
+          <div key={i} className={`d-flex ${msg.isBot ? '' : 'justify-content-end'} mb-3`}>
+            <div
+              className={`rounded p-3 position-relative shadow-sm ${
+                msg.isBot 
+                  ? (isDarkMode ? 'bg-secondary' : 'bg-white') 
+                  : 'bg-primary text-white'
+              }`}
+              style={{ maxWidth: '85%' }}
+            >
               {msg.isBot && (
-                <div className="meta-info">
-                  <span className="model">
-                    {NVIDIA_MODELS[msg.model] || msg.model}
-                  </span>
-                  <span className="time">{msg.responseTime}ms</span>
-                  {msg.cached && <span className="cached">CACHED</span>}
-                </div>
+                <>
+                  <button
+                    className="btn btn-link text-decoration-none p-0"
+                    onClick={() => toggleSpeech(msg.content)}
+                    style={{ position: 'absolute', bottom: '8px', right: '8px' }}
+                  >
+                    <i className={`fas ${isSpeaking ? 'fa-volume-mute' : 'fa-volume-up'} ${isDarkMode ? 'text-light' : 'text-dark'}`}></i>
+                  </button>
+
+                  <div className="d-flex flex-wrap align-items-center mb-2 gap-2">
+                    <div className="d-flex align-items-center">
+                      <i className={`fas fa-microphone ${isDarkMode ? 'text-light' : 'text-muted'} me-2`}></i>
+                      <small className={`${isDarkMode ? 'text-light' : 'text-muted'}`}>
+                        {formatModelName(msg.model)} • <span className="text-success">{msg.responseTime}ms</span>
+                      </small>
+                    </div>
+
+                    <div className="d-flex gap-1 flex-wrap">
+                      {msg.candidates?.map((c, idx) => (
+                        <span
+                          key={idx}
+                          className={`badge rounded-pill ${
+                            c === msg.model
+                              ? 'bg-success'
+                              : (isDarkMode ? 'bg-light text-dark' : 'bg-secondary')
+                          } py-1 px-2`}
+                          style={{ fontSize: '0.75rem' }}
+                        >
+                          {c?.split('/')?.[1]?.split('-')?.[0] || 'unknown'}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </>
               )}
-              {msg.content}
-              {msg.isBot && !msg.error && (
-                <button 
-                  className="speech-btn"
-                  onClick={() => toggleSpeech(msg.content)}
-                >
-                  {isSpeaking ? <FaVolumeMute /> : <FaVolumeUp />}
-                </button>
-              )}
+
+              <div className="mb-2" style={{ whiteSpace: 'pre-wrap' }}>
+                {msg.content}
+              </div>
             </div>
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
 
-      <form className="input-form" onSubmit={handleSubmit}>
+      {/* Input Form */}
+      <form onSubmit={handleSubmit} className={`border-top p-3 ${isDarkMode ? 'bg-dark' : 'bg-light'}`}>
         <div className="input-group">
           <button
             type="button"
-            className={`voice-btn ${isRecording ? 'active' : ''}`}
+            className={`btn ${isRecording ? 'btn-danger' : (isDarkMode ? 'btn-dark' : 'btn-outline-secondary')}`}
             onClick={handleVoiceInput}
           >
-            <FaMicrophone />
+            <i className={`fas ${isRecording ? 'fa-stop-circle' : 'fa-microphone'}`}></i>
           </button>
+
           <input
             type="text"
+            className={`form-control ${isDarkMode ? 'bg-dark text-light border-secondary' : ''}`}
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder="Type your message..."
+            placeholder={getPlaceholder()}
             disabled={isLoading}
           />
-          <button type="submit" disabled={isLoading}>
-            {isLoading ? <div className="spinner" /> : <FaPaperPlane />}
+
+          <button
+            className={`btn ${isLoading ? 'btn-danger' : 'btn-primary'}`}
+            type={isLoading ? 'button' : 'submit'}
+            onClick={isLoading ? handleStop : undefined}
+            disabled={!input.trim() && !isLoading}
+          >
+            {isLoading ? (
+              <>
+                <span className="spinner-border spinner-border-sm me-2" role="status"></span>
+                Loading...
+              </>
+            ) : (
+              <>
+                <i className="fas fa-paper-plane me-2"></i> Send
+              </>
+            )}
           </button>
         </div>
+        <small className={`mt-2 d-block ${isDarkMode ? 'text-light' : 'text-muted'}`}>
+          {selectedLanguage === 'ar' ? 'اضغط إدخال للإرسال • انقر على أيقونة السماعة لسماع الردود' : 
+          'Press Enter to send • Click speaker icon to hear responses'}
+        </small>
       </form>
     </div>
   );
 };
 
-export default ChatInterface;
+export default ChooseBot;
